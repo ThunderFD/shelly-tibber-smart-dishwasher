@@ -1,8 +1,9 @@
-// version: 0.1.0
+// version: 0.1.1
 let CONFIG = {
     api_key: "YOUR-API-KEY-HERE", // your Tibber API key
     cycleTimeout: 30 * 60, // time in seconds of no power use after which the cycle is considered finished
     cycleStartOffset: (-25 * 60),  // offset the cycle start by this time in seconds
+    hourlyPenalty: 0.15 / 12, // increase the price of each hour by this amount (percentage of cheapest price), to penalize blocks far in the future
     minPower: 6, // minimum power in W that is considered as the dishwasher running
     waitUntilHour: 3 // hour of the day when the dishwasher should be started if API fails
 };
@@ -60,8 +61,28 @@ function tibber_callback(result, error_code, error_message, userdata) {
         prices.push(tomorrow[i].total);
     }
 
-    waitUntil = get_cheapest_tibber_time(prices);
-    scheduleNextRunFinish();
+    // apply hourly penalty
+    if (CONFIG.hourlyPenalty > 0) {
+        let date = new Date();
+        let starting_hour = date.getHours();
+        let cheapest_price = prices[starting_hour];
+
+        // find cheapest price
+        for (let i = starting_hour; i < prices.length; i++) {
+            if (prices[i] < cheapest_price) {
+                cheapest_price = prices[i];
+            }
+        }
+
+        // add hourly penalty (more with each hour)
+        for (let i = starting_hour; i < prices.length; i++) {
+            prices[i] += (cheapest_price * CONFIG.hourlyPenalty * (i - starting_hour));
+        }
+
+        // calculate best time and schedule next run at that time
+        waitUntil = get_cheapest_tibber_time(prices);
+        scheduleNextRunFinish();
+    }
 }
 
 // this gets called if the Tibber API fails
@@ -209,6 +230,5 @@ log("starting at", new Date());
 main_start();
 
 
-// TODO: grace period after cycle is started, and then shorter cycle timeout?
+// TODO: make sure cycle isn't stopped again when it's started manually
 // TODO: consider blocks of two hours instead of one hour for price calc, perhaps a weighted list of 1hr blocks?
-// TODO: increase price of blocks by x% vs cheapest price to penalize blocks far in the future
